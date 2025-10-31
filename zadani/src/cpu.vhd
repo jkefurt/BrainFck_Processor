@@ -55,6 +55,7 @@ architecture behavioral of cpu is
 
 signal ptr : std_logic_vector(12 downto 0); -- datovy pointer
 signal pc  : std_logic_vector(12 downto 0); -- programovy counter
+signal decoded_value : std_logic_vector(7 downto 0);
 signal cnt : std_logic_vector(7 downto 0);  -- pocitadlo
 signal ptr_inc, ptr_dec, pc_inc, pc_dec, cnt_set_1, cnt_inc, cnt_dec, data_addr_sel  : std_logic;
 signal data_wdata_sel : std_logic_vector(1 downto 0); -- vyber co zapisovat do pameti
@@ -128,6 +129,7 @@ with data_wdata_sel select
 DATA_WDATA <= IN_DATA when "00",
               DATA_RDATA - 1 when "01",
               DATA_RDATA + 1 when "10",
+              decoded_value when "11",
               (others => '0') when others;
 
 --present state logic
@@ -226,18 +228,18 @@ process (pstate, DATA_RDATA, OUT_BUSY, IN_VLD) is
 
           when x"40" =>
           nstate <= sreturn;
-
-          when x"30" to x"39" | x"41" to x"46" => -- '0-9'
-          DATA_EN <= '1';
-          data_addr_sel <= '1';
-          DATA_RDWR <= '1';
-          nstate <= swrite;
-
+          
           when others =>
+          if (DATA_RDATA >= x"30" and DATA_RDATA <= x"39") or (DATA_RDATA >= x"41" and DATA_RDATA <= x"46") then
+            DATA_EN <= '1';
+            data_addr_sel <= '1';
+            DATA_RDWR <= '1';
+            nstate <= swrite;
+          else
           pc_inc <= '1';
           nstate <= sfetch;
+          end if;
         end case;
-
       when sptrinc =>
         DATA_EN <= '1'; 
         data_addr_sel <= '1';
@@ -295,10 +297,19 @@ process (pstate, DATA_RDATA, OUT_BUSY, IN_VLD) is
       
       when swrite =>
         DATA_EN <= '1';
-        data_addr_sel <= '0';
+        data_wdata_sel <= "11";
         DATA_RDWR <= '0';
+        data_addr_sel <= '0';
         pc_inc <= '1';
+        if (DATA_RDATA >= x"30" and DATA_RDATA <= x"39") then
+          decoded_value <= DATA_RDATA(3 downto 0) & "0000";
+        else
+          decoded_value <= (DATA_RDATA(3 downto 0) + 9) & "0000";
+        end if;
         nstate <= sfetch;
+      
+        
+
       when sreturn =>
         DONE <= '1';
         nstate <= sreturn;
