@@ -59,7 +59,7 @@ signal decoded_value : std_logic_vector(7 downto 0);
 signal cnt : std_logic_vector(7 downto 0);  -- pocitadlo
 signal ptr_inc, ptr_dec, pc_inc, pc_dec, cnt_set_1, cnt_inc, cnt_dec, data_addr_sel  : std_logic;
 signal data_wdata_sel : std_logic_vector(1 downto 0); -- vyber co zapisovat do pameti
-type t_fsm is (sinit, sfetch, sptrinc, sptrdec, smeminc, smemdec, swhile, swhilend, sdo, sdoend, sprint, sreturn, sdecode, sread, swrite);
+type t_fsm is (sinit, sfetch, sptrinc, sptrdec, smeminc, smemdec, swhile, swhilend, sdo, sdoend, sprint, sreturn, sdecode, sread, swrite, swhilecontinue, swhilendcont1, sdoendcontinue, swhilendcont2,sdoendcont2);
 signal nstate, pstate : t_fsm;
 
 begin
@@ -145,7 +145,7 @@ process (RESET, CLK) is
   end process;
 
 --nextstate
-process (pstate, DATA_RDATA, OUT_BUSY, IN_VLD) is
+process (pstate, DATA_RDATA, OUT_BUSY, IN_VLD, cnt) is
   begin
     cnt_set_1 <= '0';
     cnt_inc <= '0';
@@ -171,8 +171,8 @@ process (pstate, DATA_RDATA, OUT_BUSY, IN_VLD) is
         data_addr_sel <= '0';
         READY <= '0';
         if (DATA_RDATA = x"40") then 
-          
-          nstate <= sfetch;    
+          READY <= '1';
+          nstate <= sfetch;   
         else
           ptr_inc <= '1';     
           nstate <= sinit;      
@@ -203,15 +203,22 @@ process (pstate, DATA_RDATA, OUT_BUSY, IN_VLD) is
           nstate <= smemdec;
 
           when x"5B" => -- '['
+          pc_inc <= '1';
+          DATA_EN <= '1';
+          data_addr_sel <= '0';
           nstate <= swhile;
 
           when x"5D" => -- ']'
+          DATA_EN <= '1';
+          data_addr_sel <= '0';
           nstate <= swhilend;
 
           when x"28" => -- '('
           nstate <= sdo;
 
           when x"29" => -- ')'
+          DATA_EN <= '1';
+          data_addr_sel <= '0';
           nstate <= sdoend;
  
           when x"2E" => -- '.'
@@ -220,9 +227,6 @@ process (pstate, DATA_RDATA, OUT_BUSY, IN_VLD) is
           nstate <= sprint;
 
           when x"2C" => -- ','
-          DATA_EN <= '1';
-          data_addr_sel <= '0';
-          DATA_RDWR <= '0';
           IN_REQ <= '1';
           nstate <= sread;
 
@@ -271,25 +275,31 @@ process (pstate, DATA_RDATA, OUT_BUSY, IN_VLD) is
         nstate <= sfetch;
 
       when sprint =>
-        DATA_EN <= '1';
-        data_addr_sel <= '0'; 
         if OUT_BUSY = '0' then
-          OUT_DATA <= DATA_RDATA;
-          OUT_WE <= '1';
-          pc_inc <= '1';
-          nstate <= sfetch;
-        else
-          nstate <= sprint;
-        end if;
+    -- Výstup je volný, zapíšeme a přejdeme do sfetch
+    OUT_DATA <= DATA_RDATA;
+    OUT_WE <= '1';
+    pc_inc <= '1';
+    nstate <= sfetch;
+    -- Připravíme čtení pro sfetch (z PC)
+    DATA_EN <= '1';
+    data_addr_sel <= '1'; -- <-- OPRAVA
+  else
+    -- Výstup je zaneprázdněn, čekáme
+    nstate <= sprint;
+    -- Znovu načteme data z mem[PTR], abychom je měli v DATA_RDATA
+    DATA_EN <= '1';
+    data_addr_sel <= '0';
+  end if;
 
       when sread =>
-        DATA_EN <= '1';
-        data_addr_sel <= '0';
-        DATA_RDWR <= '0';
         IN_REQ <= '1';
         if IN_VLD = '1' then 
           data_wdata_sel <= "00";
           pc_inc <= '1';
+          DATA_EN <= '1';
+          data_addr_sel <= '0';
+          DATA_RDWR <= '0';
           nstate <= sfetch;
         else
           nstate <= sread;
@@ -308,8 +318,99 @@ process (pstate, DATA_RDATA, OUT_BUSY, IN_VLD) is
         end if;
         nstate <= sfetch;
       
+      when swhile =>
+        if DATA_RDATA = "00000000" then
+          cnt_set_1 <= '1';
+          DATA_EN <= '1';
+          data_addr_sel <= '1';
+          nstate <= swhilecontinue;
+        else
+          nstate <= sfetch;
+        end if;
+
+
+      when swhilecontinue =>
+        DATA_EN <= '1';
+        data_addr_sel <= '1';
+        if cnt = "00000001" and DATA_RDATA = x"5D" then
+          
+          nstate <= sfetch;
+        else
+          if DATA_RDATA = x"5B" then
+            cnt_inc <= '1';
+          elsif DATA_RDATA = x"5D" then
+            cnt_dec <= '1';
+          end if;
+          pc_inc <= '1';
+          nstate <= swhilecontinue;
+        end if;
+
+      when swhilend =>
+        if DATA_RDATA = "00000000" then
+          pc_inc <= '1';
+          nstate <= sfetch;
+        else
+          cnt_set_1 <= '1';
+          pc_dec <= '1';
+          nstate <= swhilendcont1;
+        end if;
+
+      when swhilendcont1 =>
+        DATA_EN <= '1';
+        data_addr_sel <= '1';
+        nstate <= swhilendcont2;
+
         
 
+      when swhilendcont2 =>
+        if cnt = "00000001" and DATA_RDATA = x"5B" then
+        
+        nstate <= sfetch;
+        else
+          if DATA_RDATA = x"5D" then
+            cnt_inc <= '1';
+          elsif DATA_RDATA = x"5B" then
+            cnt_dec <= '1';
+          end if;
+          pc_dec <= '1';
+          nstate <= swhilendcont1;
+        end if;
+      
+      when sdo =>
+        pc_inc <= '1';
+        nstate <= sfetch;
+      
+      when sdoend =>
+        if DATA_RDATA = "00000000" then
+          pc_inc <= '1';
+          nstate <= sfetch;
+        else
+          cnt_set_1 <= '1';
+          pc_dec <= '1';
+          DATA_EN <= '1';
+          data_addr_sel <= '1';
+        nstate <= sdoendcontinue;
+        end if;
+      
+      when sdoendcontinue =>
+        DATA_EN <= '1';
+        data_addr_sel <= '1';
+      nstate <= sdoendcont2;
+        
+
+      when sdoendcont2 =>
+        if cnt = "00000001" and DATA_RDATA = x"28" then
+        pc_inc <= '1';
+        nstate <= sfetch;
+        else
+          if DATA_RDATA = x"29" then
+            cnt_inc <= '1';
+          elsif DATA_RDATA = x"28" then
+            cnt_dec <= '1';
+          end if;
+            pc_dec <= '1';
+            nstate <= sdoendcontinue;
+        end if;
       when sreturn =>
         DONE <= '1';
         nstate <= sreturn;
