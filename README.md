@@ -36,8 +36,9 @@ The processor supports the standard BrainF*ck commands plus specific extensions 
 | `0x29` | `)` | `} while(*ptr)` | End of do-while loop |
 | `0x2E` | `.` | `putchar` | Print value as char |
 | `0x2C` | `,` | `getchar` | Read char from input |
-| `0x30-39` | `0-9` | `hex` | Print hex value (0-9) |
-| `0x40` | `Q` | `return` | Halt execution |
+| `0x30-39` | `0-9` | `hex` | Store hex value (0-9) |
+| `0x41-46` | `A-F` | `hex` | Store hex value (A-F) |
+| `0x40` | `@` | `return` | Halt execution |
 
 ## 🛠️ Project Structure
 * `cpu.vhd`: The core VHDL implementation of the processor (Entity & Architecture).
